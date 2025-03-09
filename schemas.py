@@ -1,8 +1,10 @@
 from pydantic import BaseModel
 from datetime import datetime
+from typing import Optional
 
 class DepartmentBase(BaseModel):
     name: str
+    address: str
 
 class DepartmentCreate(DepartmentBase):
     pass
@@ -15,13 +17,13 @@ class Department(DepartmentBase):
 class AppointmentBase(BaseModel):
     department_id: int
     time_slot: datetime
-    user_name: str
+    user_name: Optional[str] = None
+    phone_number: Optional[str] = None
 
 class AppointmentCreate(AppointmentBase):
     pass
 
 class Appointment(AppointmentBase):
     id: int
-    is_booked: bool
     class Config:
         from_attributes = True

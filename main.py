@@ -1,11 +1,16 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from fastapi.security import OAuth2PasswordRequestForm
+from datetime import timedelta
+
 import models, schemas, crud
 from database import engine, get_db
+from auth import create_access_token, get_current_admin
+from config import settings
 
 models.Base.metadata.create_all(bind=engine)
 
-app = FastAPI()
+app = FastAPI(title="ЦОН API", description="API для онлайн-записи в ЦОН")
 
 # Главная страница (просто заглушка для API)
 @app.get("/")
@@ -19,31 +24,67 @@ def get_departments(db: Session = Depends(get_db)):
 
 # Получить свободные слоты для отделения
 @app.get("/appointments/{department_id}/available/", response_model=list[schemas.Appointment])
-def get_available_slots(department_id: int, db: Session = Depends(get_db)):
-    slots = crud.get_available_slots(db, department_id)
-    if not slots:
-        raise HTTPException(status_code=404, detail="Нет свободных слотов")
+def get_booked_slots(department_id: int, db: Session = Depends(get_db)):
+    slots = crud.get_booked_slots(db, department_id)
     return slots
 
 # Создать запись
 @app.post("/appointments/", response_model=schemas.Appointment)
 def create_appointment(appointment: schemas.AppointmentCreate, db: Session = Depends(get_db)):
-    # Проверка, свободен ли слот
+    # Validate business hours (9:00 to 18:00)
+    hour = appointment.time_slot.hour
+    if hour < 9 or hour >= 18:
+        raise HTTPException(status_code=400, detail="Записаться можно только с 9:00 утра до 18:00")
+    
+    # Check if slot is already booked
     existing = db.query(models.Appointment).filter(
         models.Appointment.time_slot == appointment.time_slot,
         models.Appointment.department_id == appointment.department_id
     ).first()
-    if existing and existing.is_booked:
-        raise HTTPException(status_code=400, detail="Этот слот уже занят")
+    
+    if existing:
+        raise HTTPException(status_code=400, detail="Это время уже занято")
+    
+    # Create new appointment
     return crud.create_appointment(db, appointment)
 
-# Админ-панель (заглушка с базовой авторизацией)
-@app.get("/admin/statistics/")
-def get_statistics(db: Session = Depends(get_db), username: str = "admin", password: str = "password"):
-    if username != "admin" or password != "password":
+# Endpoint для получения JWT токена
+@app.post("/token")
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    if form_data.username != settings.ADMIN_USERNAME or form_data.password != settings.ADMIN_PASSWORD:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверный логин или пароль"
+            detail="Неверный логин или пароль",
+            headers={"WWW-Authenticate": "Bearer"},
         )
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": form_data.username}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+# Защищенная админ-панель со статистикой
+@app.get("/admin/statistics/")
+def get_statistics(db: Session = Depends(get_db), current_admin: str = Depends(get_current_admin)):
     appointments = db.query(models.Appointment).all()
-    return {"total_appointments": len(appointments)}
+    departments = db.query(models.Department).all()
+    
+    # Get total appointments
+    total_appointments = len(appointments)
+    
+    # Get appointments by department
+    appointments_by_department = {}
+    for dept in departments:
+        dept_appointments = len([a for a in appointments if a.department_id == dept.id])
+        appointments_by_department[dept.name] = dept_appointments
+    
+    return {
+        "total_appointments": total_appointments,
+        "appointments_by_department": appointments_by_department
+    }
+    booked_appointments = len([a for a in appointments if a.is_booked])
+    return {
+        "total_appointments": total_appointments,
+        "booked_appointments": booked_appointments,
+        "available_appointments": total_appointments - booked_appointments
+    }
