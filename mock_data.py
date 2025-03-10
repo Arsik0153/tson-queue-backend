@@ -13,13 +13,28 @@ Base.metadata.create_all(bind=engine)
 # Create database session
 db = SessionLocal()
 
-# Create sample departments
+# Create real ЦОН departments from Astana
 departments = [
-    {"name": "Cardiology Department", "address": fake.address()},
-    {"name": "Orthopedics Department", "address": fake.address()},
-    {"name": "Pediatrics Department", "address": fake.address()},
-    {"name": "Neurology Department", "address": fake.address()},
-    {"name": "Dental Department", "address": fake.address()}
+    {
+        "name": "ЦОН №1",
+        "address": "г. Астана, ул. Мангилик Ел, 55/8, БЦ «Астана», 1 этаж"
+    },
+    {
+        "name": "ЦОН №2",
+        "address": "г. Астана, ул. Достык, 13, ТЦ «Азия Парк», 1 этаж"
+    },
+    {
+        "name": "ЦОН №3",
+        "address": "г. Астана, ул. Туркестан, 37/1, ТЦ «Керуен», 1 этаж"
+    },
+    {
+        "name": "ЦОН №4",
+        "address": "г. Астана, ул. Желтоксан, 9, ТЦ «Азия», 1 этаж"
+    },
+    {
+        "name": "ЦОН №5",
+        "address": "г. Астана, ул. Сейфуллина, 37, ТЦ «Алматы», 1 этаж"
+    }
 ]
 
 # Add departments to database
@@ -49,11 +64,14 @@ while current_date < end_date:
             ).first()
             
             if not existing and random.random() < 0.3:  # 30% chance to create an appointment
+                # Generate Kazakhstan phone number format (7XXXXXXXXXX)
+                phone_number = f"7{random.randint(70000000000, 79999999999)}"
+                
                 appointment = Appointment(
                     department_id=dept_id,
                     time_slot=current_date,
                     user_name=fake.name(),
-                    phone_number=fake.phone_number()
+                    phone_number=phone_number
                 )
                 db.add(appointment)
     
