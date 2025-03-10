@@ -15,3 +15,11 @@ def create_appointment(db: Session, appointment: schemas.AppointmentCreate):
     db.commit()
     db.refresh(db_appointment)
     return db_appointment
+
+def get_appointment_by_id(db: Session, appointment_id: int):
+    appointment = db.query(models.Appointment).filter(models.Appointment.id == appointment_id).first()
+    if appointment:
+        # Add department details to the appointment object
+        appointment.department_name = appointment.department.name
+        appointment.department_address = appointment.department.address
+    return appointment

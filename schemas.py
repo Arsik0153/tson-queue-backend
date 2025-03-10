@@ -27,3 +27,9 @@ class Appointment(AppointmentBase):
     id: int
     class Config:
         from_attributes = True
+
+class AppointmentResponse(Appointment):
+    department_name: str
+    department_address: str
+    class Config:
+        from_attributes = True
