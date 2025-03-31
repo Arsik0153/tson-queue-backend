@@ -33,3 +33,9 @@ class AppointmentResponse(Appointment):
     department_address: str
     class Config:
         from_attributes = True
+
+class DepartmentWithStats(Department):
+    total_appointments: int
+    today_appointments: int
+    class Config:
+        from_attributes = True

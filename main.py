@@ -162,3 +162,70 @@ def get_dashboard_statistics(db: Session = Depends(get_db), current_admin: str =
         "cancelled_last_30_days": None,  # We don't have cancellation tracking in our current model
         "load_percentage": round(load_percentage, 1)
     }
+
+# Get all appointments (admin only)
+@app.get("/admin/appointments/", response_model=list[schemas.AppointmentResponse])
+def get_all_appointments(
+    db: Session = Depends(get_db),
+    current_admin: str = Depends(get_current_admin),
+    skip: int = 0,
+    limit: int = 100
+):
+    # Get appointments with department information
+    appointments = db.query(models.Appointment).join(models.Department).offset(skip).limit(limit).all()
+    
+    # Convert to response format with department info
+    return [
+        schemas.AppointmentResponse(
+            id=appointment.id,
+            department_id=appointment.department_id,
+            time_slot=appointment.time_slot,
+            user_name=appointment.user_name,
+            phone_number=appointment.phone_number,
+            department_name=appointment.department.name,
+            department_address=appointment.department.address
+        )
+        for appointment in appointments
+    ]
+
+# Get all branches (admin only)
+@app.get("/admin/branches/", response_model=list[schemas.DepartmentWithStats])
+def get_all_branches(
+    db: Session = Depends(get_db),
+    current_admin: str = Depends(get_current_admin),
+    skip: int = 0,
+    limit: int = 100
+):
+    # Get current time in Almaty timezone
+    almaty_tz = pytz.timezone('Asia/Almaty')
+    now = datetime.now(almaty_tz)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Get all branches with their appointments
+    branches = db.query(models.Department).offset(skip).limit(limit).all()
+    
+    # Calculate statistics for each branch
+    result = []
+    for branch in branches:
+        # Get all appointments for this branch
+        branch_appointments = db.query(models.Appointment).filter(
+            models.Appointment.department_id == branch.id
+        ).all()
+        
+        # Count today's appointments
+        today_appointments = len([
+            a for a in branch_appointments 
+            if a.time_slot.replace(tzinfo=pytz.UTC).astimezone(almaty_tz).date() == today_start.date()
+        ])
+        
+        # Create response with statistics
+        branch_dict = {
+            "id": branch.id,
+            "name": branch.name,
+            "address": branch.address,
+            "total_appointments": len(branch_appointments),
+            "today_appointments": today_appointments
+        }
+        result.append(schemas.DepartmentWithStats(**branch_dict))
+    
+    return result
