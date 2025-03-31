@@ -65,7 +65,7 @@ while current_date < end_date:
             
             if not existing and random.random() < 0.3:  # 30% chance to create an appointment
                 # Generate Kazakhstan phone number format (7XXXXXXXXXX)
-                phone_number = f"7{random.randint(70000000000, 79999999999)}"
+                phone_number = f"7{random.randint(0000000000, 9999999999)}"
                 
                 appointment = Appointment(
                     department_id=dept_id,
