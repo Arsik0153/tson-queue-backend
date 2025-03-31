@@ -8,6 +8,8 @@ import models, schemas, crud
 from database import engine, get_db
 from auth import create_access_token, get_current_admin
 from config import settings
+from datetime import datetime, timedelta
+import pytz
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -109,4 +111,54 @@ def get_statistics(db: Session = Depends(get_db), current_admin: str = Depends(g
         "total_appointments": total_appointments,
         "booked_appointments": booked_appointments,
         "available_appointments": total_appointments - booked_appointments
+    }
+
+# New dashboard statistics endpoint
+@app.get("/admin/dashboard-statistics/general/")
+def get_dashboard_statistics(db: Session = Depends(get_db), current_admin: str = Depends(get_current_admin)):
+    # Get current time in Almaty timezone
+    almaty_tz = pytz.timezone('Asia/Almaty')
+    now = datetime.now(almaty_tz)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_start = today_start - timedelta(days=1)
+
+    # Get all appointments
+    appointments = db.query(models.Appointment).all()
+    departments = db.query(models.Department).all()
+
+    # Total appointments
+    total_appointments = len(appointments)
+
+    # Today's appointments
+    todays_appointments = len([
+        a for a in appointments 
+        if a.time_slot.replace(tzinfo=pytz.UTC).astimezone(almaty_tz).date() == today_start.date()
+    ])
+
+    # Yesterday's appointments (for +/- calculation)
+    yesterdays_appointments = len([
+        a for a in appointments 
+        if a.time_slot.replace(tzinfo=pytz.UTC).astimezone(almaty_tz).date() == yesterday_start.date()
+    ])
+
+    # Note: Since we don't have a "cancelled" status in our model, 
+    # we can't provide cancelled appointments count
+
+    # Calculate load percentage
+    # We'll consider 8 slots per day (9:00-17:00, 1 hour each) as 100% capacity
+    slots_per_day = 8
+    total_possible_slots = len(departments) * slots_per_day
+    if total_possible_slots > 0:
+        load_percentage = (todays_appointments / total_possible_slots) * 100
+    else:
+        load_percentage = 0
+
+    return {
+        "total_appointments": total_appointments,
+        "today": {
+            "count": todays_appointments,
+            "difference_from_yesterday": todays_appointments - yesterdays_appointments
+        },
+        "cancelled_last_30_days": None,  # We don't have cancellation tracking in our current model
+        "load_percentage": round(load_percentage, 1)
     }

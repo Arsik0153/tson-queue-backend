@@ -17,6 +17,7 @@ class Appointment(Base):
     time_slot = Column(DateTime)
     user_name = Column(String)
     phone_number = Column(String)
+    status = Column(String, default="active")  # possible values: active, cancelled
     
     department = relationship("Department", back_populates="appointments")
     
