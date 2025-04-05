@@ -89,12 +89,9 @@ def get_booked_slots(department_id: int, db: Session = Depends(get_db)):
 
 # Создать запись
 @app.post("/appointments/", response_model=schemas.Appointment)
-def create_appointment(appointment: schemas.AppointmentCreate, db: Session = Depends(get_db)):
-    # Convert UTC time to Almaty time (UTC+6)
-    almaty_time = appointment.time_slot + timedelta(hours=6)
-    
+def create_appointment(appointment: schemas.AppointmentCreate, db: Session = Depends(get_db)):    
     # Validate business hours (9:00 to 18:00 Almaty time)
-    hour = almaty_time.hour
+    hour = appointment.time_slot.hour
     print(hour)
     if hour < 9 or hour >= 18:
         raise HTTPException(status_code=400, detail="Записаться можно только с 9:00 утра до 18:00 по времени Алматы")
@@ -208,10 +205,9 @@ def get_all_appointments(
     db: Session = Depends(get_db),
     current_admin: str = Depends(get_current_admin),
     skip: int = 0,
-    limit: int = 100
 ):
     # Get appointments with department information
-    appointments = db.query(models.Appointment).join(models.Department).offset(skip).limit(limit).all()
+    appointments = db.query(models.Appointment).join(models.Department).offset(skip).all()
     
     # Convert to response format with department info
     return [
@@ -233,7 +229,6 @@ def get_all_branches(
     db: Session = Depends(get_db),
     current_admin: str = Depends(get_current_admin),
     skip: int = 0,
-    limit: int = 100
 ):
     # Get current time in Almaty timezone
     almaty_tz = pytz.timezone('Asia/Almaty')
@@ -241,7 +236,7 @@ def get_all_branches(
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     # Get all branches with their appointments
-    branches = db.query(models.Department).offset(skip).limit(limit).all()
+    branches = db.query(models.Department).offset(skip).all()
     
     # Calculate statistics for each branch
     result = []
