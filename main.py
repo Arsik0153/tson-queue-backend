@@ -3,13 +3,21 @@ from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import timedelta
 from fastapi.middleware.cors import CORSMiddleware
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from io import BytesIO
+from fastapi.responses import StreamingResponse
+import pytz
 
 import models, schemas, crud
 from database import engine, get_db
 from auth import create_access_token, get_current_admin
 from config import settings
 from datetime import datetime, timedelta
-import pytz
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -23,6 +31,37 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register the font before creating the PDF
+pdfmetrics.registerFont(TTFont('ArialUnicodeMS', 'fonts/ArialUnicodeMS.ttf'))
+# pdfmetrics.registerFont(TTFont('ArialUnicodeMS-Bold', 'fonts/ArialUnicodeMS-Bold.ttf'))
+
+# Create custom styles with Cyrillic support
+def get_custom_styles():
+    styles = getSampleStyleSheet()
+    # Create custom styles with Cyrillic font
+    styles.add(ParagraphStyle(
+        name='CustomTitle',
+        parent=styles['Title'],
+        fontName='ArialUnicodeMS',
+        fontSize=24,
+        spaceAfter=30
+    ))
+    styles.add(ParagraphStyle(
+        name='CustomHeading1',
+        parent=styles['Heading1'],
+        fontName='ArialUnicodeMS',
+        fontSize=18,
+        spaceAfter=20
+    ))
+    styles.add(ParagraphStyle(
+        name='CustomNormal',
+        parent=styles['Normal'],
+        fontName='ArialUnicodeMS',
+        fontSize=12,
+        spaceAfter=12
+    ))
+    return styles
 
 # Главная страница (просто заглушка для API)
 @app.get("/")
@@ -229,3 +268,137 @@ def get_all_branches(
         result.append(schemas.DepartmentWithStats(**branch_dict))
     
     return result
+
+# Export route for generating PDF report
+@app.get("/admin/export/")
+def export_data(
+    db: Session = Depends(get_db),
+    current_admin: str = Depends(get_current_admin)
+):
+    # Create a BytesIO buffer to store the PDF
+    buffer = BytesIO()
+    
+    # Create the PDF document
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        rightMargin=72,
+        leftMargin=72,
+        topMargin=72,
+        bottomMargin=72
+    )
+    
+    # Container for the 'Flowable' objects
+    elements = []
+    
+    # Get custom styles with Cyrillic support
+    styles = get_custom_styles()
+    
+    # Add title
+    elements.append(Paragraph('ЦОН - Экспорт данных', styles['CustomTitle']))
+    elements.append(Spacer(1, 20))
+    
+    # Get current time in Almaty timezone
+    almaty_tz = pytz.timezone('Asia/Almaty')
+    current_time = datetime.now(almaty_tz)
+    elements.append(Paragraph(f'Дата отчета: {current_time.strftime("%Y-%m-%d %H:%M:%S")}', styles['CustomNormal']))
+    elements.append(Spacer(1, 20))
+    
+    # Add Branches section
+    elements.append(Paragraph('Отделения', styles['CustomHeading1']))
+    elements.append(Spacer(1, 12))
+    
+    # Get all branches with statistics
+    branches = db.query(models.Department).all()
+    if branches:
+        branch_data = [['ID', 'Название', 'Всего записей', 'Записей сегодня']]
+        
+        for branch in branches:
+            # Get statistics for each branch
+            branch_appointments = db.query(models.Appointment).filter(
+                models.Appointment.department_id == branch.id
+            ).all()
+            
+            today_appointments = len([
+                a for a in branch_appointments 
+                if a.time_slot.replace(tzinfo=pytz.UTC).astimezone(almaty_tz).date() == current_time.date()
+            ])
+            
+            branch_data.append([
+                str(branch.id),
+                branch.name,
+                str(len(branch_appointments)),
+                str(today_appointments)
+            ])
+        
+        # Create the branch table
+        branch_table = Table(branch_data)
+        branch_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'ArialUnicodeMS'),
+            ('FONTSIZE', (0, 0), (-1, 0), 14),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+            ('FONTNAME', (0, 1), (-1, -1), 'ArialUnicodeMS'),
+            ('FONTSIZE', (0, 1), (-1, -1), 12),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        elements.append(branch_table)
+    
+    elements.append(Spacer(1, 30))
+    
+    # Add Appointments section
+    elements.append(Paragraph('Записи', styles['CustomHeading1']))
+    elements.append(Spacer(1, 12))
+    
+    # Get all appointments
+    appointments = db.query(models.Appointment).join(models.Department).all()
+    if appointments:
+        appointment_data = [['ID', 'Отделение', 'Дата и время', 'Имя', 'Телефон']]
+        
+        for appt in appointments:
+            # Convert UTC time to Almaty time
+            local_time = appt.time_slot.replace(tzinfo=pytz.UTC).astimezone(almaty_tz)
+            
+            appointment_data.append([
+                str(appt.id),
+                appt.department.name,
+                local_time.strftime("%Y-%m-%d %H:%M"),
+                appt.user_name or "Н/Д",
+                appt.phone_number or "Н/Д"
+            ])
+        
+        # Create the appointments table
+        appt_table = Table(appointment_data)
+        appt_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'ArialUnicodeMS'),
+            ('FONTSIZE', (0, 0), (-1, 0), 14),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+            ('FONTNAME', (0, 1), (-1, -1), 'ArialUnicodeMS'),
+            ('FONTSIZE', (0, 1), (-1, -1), 12),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        elements.append(appt_table)
+    
+    # Build PDF document
+    doc.build(elements)
+    
+    # Reset buffer position to start
+    buffer.seek(0)
+    
+    # Return the PDF as a downloadable file
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=tson_report_{current_time.strftime('%Y%m%d_%H%M%S')}.pdf"
+        }
+    )
