@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from datetime import datetime, time
+from typing import Dict, ClassVar, Any
 
 class Settings(BaseSettings):
     # Database settings
@@ -17,6 +18,14 @@ class Settings(BaseSettings):
     # Admin credentials
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: str = "password"  # In production, use hashed password
+    
+    # Timezone configuration
+    TIMEZONE_NAME: str = "Asia/Almaty"  # Almaty/Astana timezone
+    WORKING_HOURS: Dict[str, int] = {
+        "start": 9,  # 9 AM
+        "end": 18    # 6 PM (exclusive)
+    }
+    SLOT_DURATION_MINUTES: int = 30
     
     class Config:
         env_file = ".env"
